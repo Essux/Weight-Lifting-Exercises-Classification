@@ -437,12 +437,12 @@ testing &lt;- pml.training[-inTrain, ]</code></pre>
 ##   C    0    0  684    0    0
 ##   D    0    0    0  643    0
 ##   E    0    0    0    0  721</code></pre>
-<p>Given the estimation of the accuracy on the test data we can expect the model to have a near perfect prediction accuracy in the test data that is drawn from this same experiment. On the other hand this model would not extrapolate well to other datasets because exploits the specific experimental conditions of this dataset.</p>
+<p>Given the estimation of the accuracy on the test data we can expect the model to have a near perfect prediction accuracy in the test data that is drawn from this same experiment. On the other hand this model would not extrapolate well to other datasets because exploits the specific experimental conditions of the data collection process.</p>
 <p>Having said that, a model that generalizes well on real world data should not exploit this specific conditions, thus we will develop another model considering only sensor data.</p>
 </div>
 <div id="using-only-sensor-data" class="section level2">
 <h2>Using only sensor data</h2>
-<p>Training a Decision Tree yields a cross-validation accuracy of 93%.</p>
+<p>Training a Decision Tree yields a cross-validation accuracy of 91.6%.</p>
 <pre class="r"><code>set.seed(8877)
 # 10-fold CV
 fitControl &lt;- trainControl(method = &quot;repeatedcv&quot;,
