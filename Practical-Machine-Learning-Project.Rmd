@@ -1,0 +1,185 @@
+---
+title: "Practical Machine Learning Project"
+author: "Juan Jose Suarez"
+date: "27/6/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(reshape2)
+library(caret)
+library(randomForest)
+```
+
+```{r load_data,include=FALSE}
+pml.training <- read.csv("C:/Users/juanj/Desktop/Data Science Specialization/Practical Machine Learning/Project/pml-training.csv", stringsAsFactors=TRUE, na.strings=c("", "NA","#DIV/0!"))
+```
+
+# Clean Data
+
+We have 19.622 samples. Drop 100 columns with mostly null data, 1 date column and the row number.
+
+```{r clean_data, echo=FALSE}
+dim(pml.training)
+pml.training <- pml.training[ , colSums(is.na(pml.training)) == 0]
+pml.training$cvtd_timestamp <- as.Date(as.character(pml.training$cvtd_timestamp), format = "%d/%m/%Y %H:%M")
+pml.training <- pml.training[, c(-1, -5)]
+dim(pml.training)
+```
+
+# Data Exploration
+
+```{r class_proportions_plot}
+ggplot(pml.training, aes(x = classe)) + geom_bar(fill="red") + ggtitle("Class Proportions")
+```
+
+Variables with high correlation.
+
+```{r correlated_variables, echo=F}
+cor.matrix <- melt(cor(pml.training[,c(-1, -4, -58)]))
+cor.matrix <- cor.matrix[cor.matrix$Var1 != cor.matrix$Var2, ]
+colnames(cor.matrix)[3] <- "R"
+cor.matrix$R2 <- (cor.matrix$R)^2
+cor.matrix <- cor.matrix[order(cor.matrix$R2, decreasing = T), ]
+
+cor.strings <- data.frame(Var1 = as.character(cor.matrix$Var1), Var2 = as.character(cor.matrix$Var2))
+cor.strings$A <- apply(cor.strings, 1, min)
+cor.strings$B <- apply(cor.strings, 1, max)
+cor.matrix$A <- cor.strings$A
+cor.matrix$B <- cor.strings$B
+cor.matrix <- unique(cor.matrix[, c("A", "B", "R", "R2")])
+head(cor.matrix)
+```
+
+Num window seems to explain perfectly the user.
+
+```{r user_num_window_plot}
+ggplot(pml.training, aes(x=num_window, fill=user_name)) + geom_histogram(binwidth = 1) + ggtitle("Num window per user")
+```
+
+Num window also seems to explain perfectly the class. This correlations seem to represent the structure of the experimental settings. 
+
+```{r class_num_window_plot}
+ggplot(pml.training, aes(x=num_window, fill=classe)) + geom_histogram(binwidth = 1) + ggtitle("Num window per class")
+```
+
+Actually if you zoom in you can see that the classes correspond exactly to certain intervals of the num_window variable. Is it possible to perfectly predict the class by training a Decision Tree only with the num_window variable?
+
+```{r zoom_class_num_window_plot, warning=F}
+ggplot(pml.training, aes(x=num_window, fill=classe)) + geom_histogram(binwidth = 1) + ggtitle("Num window per class") + xlim(400, 450)
+```
+
+# Model
+
+Divide the data 80% for training and 20% for testing.
+
+```{r data_split}
+set.seed(1234)
+inTrain <- createDataPartition(pml.training$classe, p = 0.8)[[1]]
+training <- pml.training[inTrain, ]
+testing <- pml.training[-inTrain, ]
+```
+
+## Using only num_window
+
+Use 10 Fold Cross Validation repeated 3 times. Train a Decision Tree only using num_window trying multiple complexity (cp) parameters.
+
+```{r training_exploit_tree, include=FALSE}
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 10,
+                           repeats = 3)
+
+modelTree <- train(
+  classe ~ num_window,
+  training,
+  method = "rpart",
+  trControl = fitControl,
+  tuneGrid = data.frame(cp = c(0.001, 0.005, 0.01))
+) 
+```
+
+
+```{r exploit_tree_results}
+modelTree
+```
+
+```{r exploit_tree_accuracy}
+postResample(pred = predict(modelTree, newdata = testing), testing$classe)
+table(predict(modelTree, newdata = testing), testing$classe)
+```
+
+
+Given the estimation of the accuracy on the test data we can expect the model to have a near perfect prediction accuracy in the test data that is drawn from this same experiment. On the other hand this model would not extrapolate well to other datasets because exploits the specific experimental conditions of the data collection process.
+
+Having said that, a model that generalizes well on real world data should not exploit this specific conditions, thus we will develop another model considering only sensor data.
+
+## Using only sensor data
+
+```{r remove_exploit_data, include=FALSE}
+training <- training[, c(-1, -2, -3, -4, -5)]
+colnames(training)
+```
+
+Training a Decision Tree yields a cross-validation accuracy of 91.6%.
+
+```{r training_tree}
+set.seed(8877)
+# 10-fold CV
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 10,
+                           repeats = 3)
+
+modelTree <- train(
+  classe ~ .,
+  training,
+  method = "rpart",
+  trControl = fitControl,
+  tuneGrid = data.frame(cp = c(0.00001, 0.00005, 0.0001, 0.0005, 0.001))
+)
+
+modelTree
+```
+
+A C5.0 tree with boosting yields a cross-validation accuracy of 99%.
+
+```{r training_c5.0}
+set.seed(9191)
+# 5 fold CV
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1) 
+
+tuneGrid <- expand.grid(.trials = c(5, 7, 9),
+                       .model = c("tree"),
+                       .winnow = c(F))
+
+modelC5 <- train(
+  classe ~ .,
+  training,
+  method = "C5.0",
+  trControl = fitControl,
+  verbose=T,
+  tuneGrid = tuneGrid
+)
+
+modelC5
+```
+
+A Random Forest yields an out of bag accuracy of 99.46%.
+
+```{r training_random_forest}
+set.seed(2424)
+modelRandomForest <-  randomForest(classe ~ ., data = training, ntree = 100)
+modelRandomForest
+```
+
+
+We choose the best model and estimate its performance in the test data.
+
+```{r accuracy_random_forest}
+postResample(predict(modelRandomForest, newdata = testing), testing$classe)
+```
+
+This last model has a great accuracy (99.36%) on the testing data and is expected to generalize better in real world situations because it does not exploit specific conditions of the data collection process.
